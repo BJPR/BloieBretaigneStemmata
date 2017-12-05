@@ -1,0 +1,167 @@
+# 4 December 2017
+# Brian J. Reilly
+# Merlin Vulgate Continuation
+# Bloie Bretaigne Passage
+
+
+### Spreadsheet
+# URL for Google Sheet
+# goo.gl/v5tuuk
+
+# Install Packages if needs be
+install.packages("googlesheets")
+install.packages("ape")
+install.packages("reshape2")
+install.packages("stats")
+install.packages("phangorn")
+
+# Load Libraries
+library(googlesheets)
+library(ape) # For Plot Phylo
+library(reshape2) # For Melt
+library(stats)
+library(phangorn) # For UPGMA
+
+# Load Collation Matrix
+# Google will ask for authorization code
+Collation.Matrix.df <- as.data.frame(gs_read(ss=gs_title("Bloie Stemmata"), ws = "Bloie Distance"))
+rownames(Collation.Matrix.df) <- Collation.Matrix.df$MS
+Collation.Matrix.df <- Collation.Matrix.df[,-1]
+
+# Load Block Sizes
+Block.Size.m <- as.data.frame(gs_read(ss=gs_title("Bloie Stemmata"), ws = "Blocks"))
+
+# Distance (binary) by All rows; NOT blocked by site of variation
+Distance.All.Rows.dist <- dist(Collation.Matrix.df, method = "binary")
+
+# Aggregate Binary Distance by Block (site of variation)
+# Create Distance Matrix (This will be set to 0)
+Distance.All.Blocks.dist <- dist(Collation.Matrix.df, method = "binary")
+# Set to 0
+Distance.All.Blocks.dist <- Distance.All.Blocks.dist - Distance.All.Blocks.dist
+# Calculate Binary Distance by Block and Aggregate (Manhattan Distance)
+for(i in 1:dim(Block.Size.m)[1]){
+  
+  block.size.temp <- Block.Size.m[i,2]
+  if(i == 1){block.start <- 1} else{
+    block.start <- sum(Block.Size.m[1:(i-1),2]) + 1}
+  
+  distance.temp <- dist(Collation.Matrix.df[,block.start:(block.start+(block.size.temp -1))], method = "binary")
+  
+  Distance.All.Blocks.dist <- Distance.All.Blocks.dist + distance.temp
+}
+Distance.All.Blocks.dist.m <- as.matrix(Distance.All.Blocks.dist)
+Distance.All.Blocks.dist.m[upper.tri(Distance.All.Blocks.dist.m)] <- NA
+diag(Distance.All.Blocks.dist.m) <- NA
+Distance.All.Blocks.dist.m <- melt(Distance.All.Blocks.dist.m)
+
+## Write to CSV
+current.date.v <- format(Sys.time(), "%Y%m%d")
+# As List of Manucsript Pairs from least distant to most
+write.csv(na.omit(Distance.All.Blocks.dist.m[order(Distance.All.Blocks.dist.m$value),]), file = paste("Distance.by.Block", current.date.v, ".csv", sep =""))
+# As Distance Matrix for Printing
+write.csv(as.matrix(Distance.All.Blocks.dist), file = "Original.Distances.csv")
+
+# UPGMA Tree
+Distance.All.Blocks.upgma.phylo <- upgma(Distance.All.Blocks.dist)
+plot.phylo(Distance.All.Blocks.upgma.phylo, direction = "rightwards", type = "phylogram", srt = 0, label.offset = .01, adj = .5, show.node.label = T)
+
+### Bootstrap by Block
+# Create List
+Boot.Blocks.l <- list()
+#Boot.Blocks.nj.l <- list()
+Boot.Blocks.upgma.l <- list()
+#Boot.Blocks.UNJ.l <- list()
+
+# Create Boot Distances and Trees
+Distance.Boot.Blocks.dist <- dist(Collation.Matrix.df, method = "binary")
+for(j in 1:1e6){
+  boot.blocks.v <- sample(1:dim(Block.Size.m)[1], dim(Block.Size.m)[1], replace = T)
+  # Set Dist to 0
+  Distance.Boot.Blocks.temp.dist <- Distance.All.Blocks.dist - Distance.All.Blocks.dist
+  
+  for(i in 1:dim(Block.Size.m)[1]){
+    block.current <- boot.blocks.v[i]
+    block.size.temp <- Block.Size.m[block.current,2]
+    block.start <- sum(Block.Size.m[1:(block.current-1),2]) + 1
+    
+    distance.temp <- dist(Collation.Matrix.df[,block.start:(block.start+(block.size.temp -1))], method = "binary")
+    
+    Distance.Boot.Blocks.temp.dist <- Distance.Boot.Blocks.temp.dist + distance.temp
+  }
+  Boot.Blocks.l[[j]] <- Distance.Boot.Blocks.temp.dist
+  #Boot.Blocks.nj.l[[j]] <- nj(Distance.Boot.Blocks.temp.dist)
+  Boot.Blocks.upgma.l[[j]] <- upgma(Distance.Boot.Blocks.temp.dist, method = "average")
+  #Boot.Blocks.UNJ.l[[j]] <- UNJ(Distance.Boot.Blocks.temp.dist)
+}
+
+#Boot.Blocks.nj.prop.l <- lapply(Boot.Blocks.nj.l,prop.part)
+#Boot.Blocks.upgma.prop.l <- lapply(Boot.Blocks.upgma.l,prop.part)
+#Boot.Blocks.UNJ.prop.l <- lapply(Boot.Blocks.UNJ.l,prop.part)
+
+#Boot.Blocks.nj.all.prop <- prop.part(Boot.Blocks.nj.l)
+Boot.Blocks.upgma.all.prop <- prop.part(Boot.Blocks.upgma.l)
+#Boot.Blocks.UNJ.all.prop <- prop.part(Boot.Blocks.UNJ.l)
+
+#Boot.Blocks.nj.Pairs.df <- as.data.frame(matrix(data = NA, ncol = 3, nrow =1))
+#colnames(Boot.Blocks.nj.Pairs.df) <- c("Freq","MS1","MS2")
+Boot.Blocks.upgma.Pairs.df <- as.data.frame(matrix(data = NA, ncol = 3, nrow =1))
+colnames(Boot.Blocks.upgma.Pairs.df) <- c("Freq","MS1","MS2")
+#Boot.Blocks.UNJ.Pairs.df <- as.data.frame(matrix(data = NA, ncol = 3, nrow =1))
+#colnames(Boot.Blocks.UNJ.Pairs.df) <- c("Freq","MS1","MS2")
+
+#row.v <- 1
+#for(j in 1:length(Boot.Blocks.nj.all.prop)){
+  if(length(Boot.Blocks.nj.all.prop[[j]]) == 2){
+    
+    Boot.Blocks.nj.Pairs.df[row.v,1] <- attr(Boot.Blocks.nj.all.prop,"number")[j]
+    Boot.Blocks.nj.Pairs.df[row.v,2] <- attr(Boot.Blocks.nj.all.prop,"labels")[Boot.Blocks.nj.all.prop[[j]][1]]
+    Boot.Blocks.nj.Pairs.df[row.v,3] <- attr(Boot.Blocks.nj.all.prop,"labels")[Boot.Blocks.nj.all.prop[[j]][2]]
+    row.v <- row.v +1
+  }
+}
+row.v <- 1
+for(j in 1:length(Boot.Blocks.upgma.all.prop)){
+  if(length(Boot.Blocks.upgma.all.prop[[j]]) == 2){
+    
+    Boot.Blocks.upgma.Pairs.df[row.v,1] <- attr(Boot.Blocks.upgma.all.prop,"number")[j]
+    Boot.Blocks.upgma.Pairs.df[row.v,2] <- attr(Boot.Blocks.upgma.all.prop,"labels")[Boot.Blocks.upgma.all.prop[[j]][1]]
+    Boot.Blocks.upgma.Pairs.df[row.v,3] <- attr(Boot.Blocks.upgma.all.prop,"labels")[Boot.Blocks.upgma.all.prop[[j]][2]]
+    row.v <- row.v +1
+  }
+}
+#row.v <- 1
+#for(j in 1:length(Boot.Blocks.UNJ.prop)){
+  if(length(Boot.Blocks.UNJ.prop[[j]]) == 2){
+    
+    Boot.Blocks.UNJ.Pairs.df[row.v,1] <- attr(Boot.Blocks.UNJ.prop,"number")[j]
+    Boot.Blocks.UNJ.Pairs.df[row.v,2] <- attr(Boot.Blocks.UNJ.prop,"labels")[Binary.Boot.prop[[j]][1]]
+    Boot.Blocks.UNJ.Pairs.df[row.v,3] <- attr(Boot.Blocks.UNJ.prop,"labels")[Binary.Boot.prop[[j]][2]]
+    row.v <- row.v +1
+  }
+}
+
+#dim(Boot.Blocks.nj.Pairs.df)
+dim(Boot.Blocks.upgma.Pairs.df)
+Boot.Blocks.upgma.Pairs.df[order(-Boot.Blocks.upgma.Pairs.df$Freq),]
+#dim(Boot.Blocks.UNJ.Pairs.df)
+
+#Boot.Blocks.nj.Pairs.df[order(-Boot.Blocks.nj.Pairs.df$Freq)[1:5],]
+#Boot.Blocks.upgma.Pairs.df[order(-Boot.Blocks.upgma.Pairs.df$Freq)[1:5],]
+#Boot.Blocks.UNJ.Pairs.df[order(-Boot.Blocks.UNJ.Pairs.df$Freq)[1:5],]
+
+#write.csv(Boot.Blocks.nj.Pairs.df[order(-Boot.Blocks.nj.Pairs.df$Freq),], file = "nj.pairs.csv")
+write.csv(Boot.Blocks.upgma.Pairs.df[order(-Boot.Blocks.upgma.Pairs.df$Freq),], file = "upgma.pairs.csv")
+#write.csv(Boot.Blocks.UNJ.Pairs.df[order(-Boot.Blocks.UNJ.Pairs.df$Freq),], file = "UNJ.pairs.csv")
+
+# Histograms for each Pairwise
+# n = 15; for i < j ≤ n, the dissimilarity between (row) i and j is do[n*(i-1) - i*(i-1)/2 + j-i]
+Boot.Blocks.l # These are the 1e6 dist objects
+
+1:150
+number.of.mss <- 15
+number.of.mss*(i-1) - i*(i-1)/2 + j-i
+# attr(Boot.Blocks.l[[1]], "Labels")
+# i < j
+paste(attr(Boot.Blocks.l[[1]], "Labels")[1], attr(Boot.Blocks.l[[1]], "Labels")[2], sep = "_vs_")
+which(attr(Boot.Blocks.l[[1]], "Labels") == "Bodmer 147")
